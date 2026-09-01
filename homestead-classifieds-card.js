@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.3";
+const HCC_VERSION = "2026.8.4";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -108,7 +108,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
     this._sig = out.sig;
     this.shadowRoot.innerHTML = out.html;
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.entity)));
-    if (loaded) requestAnimationFrame(() => this._remember());
+    if (loaded) setTimeout(() => this._remember(), 60);
   }
   _loaded() {
     const c = this._cfg;

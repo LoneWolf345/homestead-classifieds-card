@@ -50,7 +50,7 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   el2.hass = mkHass({}, () => new Promise(() => {}));
   check("hm: reserves remembered height while loading", el2.style.minHeight === "480px");
   const el3 = new Card(); el3._h = 512; el3.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
-  el3.hass = mkHass({}, async () => []); await tick(); await tick();
+  el3.hass = mkHass({}, async () => []); await tick(); await tick(); await new Promise((r) => setTimeout(r, 120));
   check("hm: releases reservation once loaded", el3.style.minHeight === "" && el3.shadowRoot.innerHTML.includes("Nothing on the docket"));
   check("hm: remembers rendered height", store.get("hcc-h:calendar:calendar.x:") === "512");
   const el4 = new Card(); el4.setConfig({ mode: "notices", todo_lists: ["todo.a"] });
