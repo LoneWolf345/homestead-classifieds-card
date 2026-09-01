@@ -65,7 +65,7 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
 {
   const el = new Card(); el.setConfig({ mode: "masthead", title: "The Homestead Times", place: "Maricopa, Arizona", price: "Two bits", tagline_entity: "sensor.homestead_tagline", tagline_fallback: "Fallback line" });
   el.hass = mkHass({ "sensor.homestead_tagline": { state: "Opinions expressed are those of the automations", attributes: {} } });
-  const h = el.shadowRoot.innerHTML; const doy = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+  await tick(); const h = el.shadowRoot.innerHTML; const doy = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
   check("mast: title + vol/no + place + price", h.includes("The Homestead Times") && h.includes(`VOL. ${today.getFullYear() % 10}, No. ${doy} · MARICOPA, ARIZONA · PRICE: TWO BITS`));
   check("mast: tagline from sensor", h.includes("Opinions expressed are those of the automations"));
   check("mast: no reservation needed (sync)", el.style.minHeight === "");
