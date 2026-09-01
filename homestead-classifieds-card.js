@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.7";
+const HCC_VERSION = "2026.8.8";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -344,30 +344,37 @@ class HomesteadClassifiedsCard extends HTMLElement {
         if (n.shadowRoot) for (const c of n.shadowRoot.children) walk(c); for (const c of n.children) walk(c); };
       walk(document.querySelector("home-assistant")); return out;
     };
-    let last = { top: -1, h: -1, ih: -1 };
-    const onT = (k) => () => { if (touches.length < 150) touches.push([k, Date.now() - t0, Math.round(sc.scrollTop)]); };
+    let last = { top: -1, h: -1, ih: -1 }, lastTouch = -9999, jumps = 0, posting = false;
+    const onT = (k) => () => { lastTouch = Date.now() - t0; if (touches.length < 150) touches.push([k, lastTouch, Math.round(sc.scrollTop)]); };
     window.addEventListener("touchstart", onT("s"), { passive: true });
     window.addEventListener("touchend", onT("e"), { passive: true });
+    const at = new Date(t0).toISOString();
+    const post = async (why) => {
+      if (posting) return; posting = true;
+      let ls = [];
+      try { ls = Object.keys(localStorage).filter((k) => /-h:/.test(k)).map((k) => k.slice(0, 26) + "=" + localStorage.getItem(k)); } catch (e) { ls = ["localStorage unavailable"]; }
+      const run = { at, why, elapsed: Date.now() - t0, ua: navigator.userAgent.slice(0, 90), w: window.innerWidth, h: window.innerHeight, vis: document.visibilityState, restore: history.scrollRestoration, ls, touches: touches.slice(-60), log: log.slice(-150), final: heights(), jumps };
+      try {
+        const prev = (this._hass.states[this._cfg.probe_entity] || {}).attributes || {};
+        const runs = [run].concat((prev.runs || []).filter((r) => r.at !== at)).slice(0, 4);
+        await this._hass.callApi("POST", `states/${this._cfg.probe_entity}`, { state: new Date().toISOString(), attributes: { runs } });
+      } catch (e) { /* probe is best-effort */ }
+      posting = false;
+    };
     const iv = setInterval(() => {
-      const top = Math.round(sc.scrollTop), h = sc.scrollHeight, ih = window.innerHeight;
+      const now = Date.now() - t0, top = Math.round(sc.scrollTop), h = sc.scrollHeight, ih = window.innerHeight;
       if (top !== last.top || h !== last.h || ih !== last.ih) {
-        const e = [Date.now() - t0, top, h, ih];
-        if ((h !== last.h || ih !== last.ih) && log.length < 120) e.push(heights());
+        const e = [now, top, h, ih];
+        if ((h !== last.h || ih !== last.ih) && log.length < 200) e.push(heights());
+        // a jump: the page moved up ≥ 40px with no finger on the glass for the last 600 ms
+        if (last.top >= 0 && top < last.top - 40 && now - lastTouch > 600) { e.push("JUMP"); jumps++; setTimeout(() => post("jump"), 700); }
         if (log.length < 400) log.push(e);
         last = { top, h, ih };
       }
     }, 100);
-    setTimeout(async () => {
-      clearInterval(iv);
-      let ls = [];
-      try { ls = Object.keys(localStorage).filter((k) => /-h:/.test(k)).map((k) => k.slice(0, 26) + "=" + localStorage.getItem(k)); } catch (e) { ls = ["localStorage unavailable"]; }
-      const run = { at: new Date(t0).toISOString(), ua: navigator.userAgent.slice(0, 90), w: window.innerWidth, h: window.innerHeight, vis: document.visibilityState, restore: history.scrollRestoration, ls, touches, log, final: heights() };
-      try {
-        const prev = (this._hass.states[this._cfg.probe_entity] || {}).attributes || {};
-        const runs = [run].concat(prev.runs || []).slice(0, 3);
-        await this._hass.callApi("POST", `states/${this._cfg.probe_entity}`, { state: new Date().toISOString(), attributes: { runs } });
-      } catch (e) { /* probe is best-effort */ }
-    }, secs * 1000);
+    setTimeout(() => post("8s"), 8000);
+    setTimeout(() => post("20s"), 20000);
+    setTimeout(() => { clearInterval(iv); post("end"); }, secs * 1000);
   }
 
   // ---------- mode: masthead / colophon (synchronous — no late growth, no template wait) ----------
