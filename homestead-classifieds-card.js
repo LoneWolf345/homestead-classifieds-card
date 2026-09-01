@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.5";
+const HCC_VERSION = "2026.8.6";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -65,6 +65,13 @@ class HomesteadClassifiedsCard extends HTMLElement {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this._sig = null; this._events = []; this._miles = null; this._todos = [];
     this._fetchedAt = 0; this._fetchDay = ""; this._todoAt = 0; this._todoStamp = null;
+    // Web fonts reflow the text after first paint; keep the height reservation until they
+    // are in (3 s cap so a blocked font host never holds the page).
+    if (this._fontsReady === undefined) {
+      const fonts = typeof document !== "undefined" && document.fonts;
+      this._fontsReady = !fonts;
+      if (fonts) Promise.race([fonts.ready, new Promise((r) => setTimeout(r, 3000))]).then(() => { this._fontsReady = true; this._sig = null; this._render(); this._fitTitle(); });
+    }
     this._render();
   }
 
@@ -75,8 +82,11 @@ class HomesteadClassifiedsCard extends HTMLElement {
     this._render();
   }
   getCardSize() { return 6; }
-  connectedCallback() { this._tick = setInterval(() => { this._sig = null; this._render(); }, 60000); }
-  disconnectedCallback() { clearInterval(this._tick); }
+  connectedCallback() {
+    this._tick = setInterval(() => { this._sig = null; this._render(); }, 60000);
+    if (typeof ResizeObserver !== "undefined" && !this._ro) { this._ro = new ResizeObserver(() => this._fitTitle()); this._ro.observe(this); }
+  }
+  disconnectedCallback() { clearInterval(this._tick); if (this._ro) { this._ro.disconnect(); this._ro = null; } }
 
   // ---------- copy: AI sensor attribute, else built-in ----------
   _copy(key, fb) {
@@ -110,13 +120,27 @@ class HomesteadClassifiedsCard extends HTMLElement {
     this._sig = out.sig;
     this.shadowRoot.innerHTML = out.html;
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.entity)));
+    if (this._cfg.mode === "masthead") this._fitTitle();
     if (loaded) setTimeout(() => this._remember(), 60);
   }
   _loaded() {
     const c = this._cfg;
+    if (!this._fontsReady) return false;
     if (c.mode === "calendar") return this._fetchedAt > 0;
     if (c.mode === "notices") return !c.todo_lists.length || this._todoAt > 0;
     return true;
+  }
+  // Shrink the nameplate until it fits its column on one line (measured, so it holds for
+  // any font, phone width or letter-spacing). Runs after render, when fonts land, and on resize.
+  _fitTitle() {
+    const t = this.shadowRoot && this.shadowRoot.querySelector(".mh-t");
+    if (!t || !t.clientWidth) return;
+    t.style.fontSize = ""; t.style.letterSpacing = "";
+    let fs = parseFloat(getComputedStyle(t).fontSize) || 52;
+    for (let i = 0; i < 40 && t.scrollWidth > t.clientWidth && fs > 14; i++) {
+      fs -= 1; t.style.fontSize = fs + "px";
+      if (fs < 36) t.style.letterSpacing = "0";
+    }
   }
   _hkey() { const c = this._cfg; return "hcc-h:" + c.mode + ":" + (c.calendars || []).map((x) => x.entity).join(",") + ":" + (c.todo_lists || []).join(","); }
   _reserve() { try { const v = parseInt(localStorage.getItem(this._hkey()), 10); return v > 40 ? v : 0; } catch (e) { return 0; } }
@@ -312,9 +336,9 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const tag = tagE && !bad(tagE.state) ? tagE.state : (c.tagline_fallback || "");
     const date = `${DAYS[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`.toUpperCase();
     const rest = [`VOL. ${now.getFullYear() % 10}, No. ${doy}`].concat(c.place ? [c.place.toUpperCase()] : [], c.price ? [`PRICE: ${c.price.toUpperCase()}`] : []).join(" · ");
-    const body = `<h1 class="mt">${esc(c.title || "The Homestead Times")}</h1>
-      <div class="dl"><span>${esc(date)}</span><span class="sep">·</span><span>${esc(rest)}</span></div>
-      ${tag ? `<div class="tg"${c.tagline_entity ? ` data-entity="${esc(c.tagline_entity)}"` : ""}>${esc(tag)}</div>` : ""}`;
+    const body = `<h1 class="mh-t">${esc(c.title || "The Homestead Times")}</h1>
+      <div class="mh-d"><span>${esc(date)}</span><span class="sep">·</span><span>${esc(rest)}</span></div>
+      ${tag ? `<div class="mh-q"${c.tagline_entity ? ` data-entity="${esc(c.tagline_entity)}"` : ""}>${esc(tag)}</div>` : ""}`;
     return { sig: body, html: `<style>${this._css()}</style><div class="wrap"><div class="card mast">${body}</div></div>` };
   }
   _colophon() {
@@ -367,14 +391,14 @@ class HomesteadClassifiedsCard extends HTMLElement {
   .corr b { font-style: normal; font-weight: 700; letter-spacing: .3px; }
   .foot { font-size: max(7px, calc(9*var(--px))); letter-spacing: .3px; color: ${TAN}; margin-top: calc(12*var(--px)); line-height: 1.5; }
   .card.mast, .card.colo { padding: 4px 16px 10px; text-align: center; color: #2b2118; }
-  .mt { font-family: Fraunces, Georgia, serif; font-size: clamp(22px, 9cqw, 52px); font-weight: 900; letter-spacing: 1px; line-height: 1.05; white-space: nowrap; margin: 8px 0 6px; padding: 14px 0 10px; border-top: 4px double #2b2118; border-bottom: 1px solid #2b2118; }
-  .dl { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 10px; row-gap: 3px; font-family: Archivo, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; padding: 7px 0 8px; border-bottom: 3px double #2b2118; }
-  .dl span { white-space: nowrap; }
-  .tg { font-family: Fraunces, Georgia, serif; font-style: italic; font-size: 15px; color: #5a4632; margin-top: 10px; cursor: pointer; text-wrap: balance; }
+  .mh-t { font-family: Fraunces, Georgia, serif; font-size: clamp(20px, 8cqw, 52px); font-weight: 900; letter-spacing: 1px; line-height: 1.05; white-space: nowrap; overflow: hidden; margin: 8px 0 6px; padding: 14px 0 10px; border-top: 4px double #2b2118; border-bottom: 1px solid #2b2118; }
+  .mh-d { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 10px; row-gap: 3px; font-family: Archivo, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; padding: 7px 0 8px; border-bottom: 3px double #2b2118; }
+  .mh-d span { white-space: nowrap; }
+  .mh-q { font-family: Fraunces, Georgia, serif; font-style: italic; font-size: 15px; color: #5a4632; margin-top: 10px; cursor: pointer; text-wrap: balance; }
   .corule { border-top: 3px double #2b2118; margin: 4px 0 12px; }
   .co { font-family: Archivo, 'Segoe UI', sans-serif; font-size: 10.5px; letter-spacing: 1.5px; color: #5a4632; text-transform: uppercase; line-height: 1.7; }
   .co strong { color: #2b2118; }
-  @container (max-width: 560px) { .dl { flex-direction: column; font-size: 10px; letter-spacing: 2px; } .dl .sep { display: none; } .tg { font-size: 14px; } .co { font-size: 9.5px; letter-spacing: 1px; } }`;
+  @container (max-width: 560px) { .mh-d { flex-direction: column; font-size: 10px; letter-spacing: 2px; } .mh-d .sep { display: none; } .mh-q { font-size: 14px; } .co { font-size: 9.5px; letter-spacing: 1px; } }`;
   }
 }
 

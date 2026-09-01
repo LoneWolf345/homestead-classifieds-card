@@ -1,7 +1,7 @@
 // smoke.mjs — node harness for homestead-classifieds-card (no browser, no framework)
 import fs from "node:fs"; import vm from "node:vm";
 const src = fs.readFileSync(new URL("./homestead-classifieds-card.js", import.meta.url), "utf8");
-class HTMLElement { constructor() { this._sr = null; this.style = {}; this._h = 300; } attachShadow() { this._sr = { innerHTML: "", querySelectorAll: () => [] }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} getBoundingClientRect() { return { height: this._h }; } }
+class HTMLElement { constructor() { this._sr = null; this.style = {}; this._h = 300; } attachShadow() { this._sr = { innerHTML: "", querySelectorAll: () => [], querySelector: () => null }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} getBoundingClientRect() { return { height: this._h }; } }
 const defs = {}; const store = new Map();
 const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
 const ctx = { HTMLElement, customElements: { define: (n, c) => (defs[n] = c), get: (n) => defs[n] }, document: { getElementById: () => null, createElement: () => ({}), head: { appendChild() {} } }, console, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, setInterval: () => 0, clearInterval() {}, setTimeout, Date, localStorage, requestAnimationFrame: (f) => setTimeout(f, 0) };
@@ -73,6 +73,9 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   const el3 = new Card(); el3.setConfig({ mode: "colophon", lead: "Published every minute by Home Assistant", text: "Set in Fraunces and Archivo" });
   el3.hass = mkHass({});
   check("colophon: lead + text", el3.shadowRoot.innerHTML.includes("<strong>Published every minute by Home Assistant</strong> — Set in Fraunces and Archivo"));
+  check("mast: title uses its own class (no .mt collision with milestones)", h.includes('class="mh-t"') && !h.includes('class="mt"'));
+  const css = h.slice(h.indexOf("<style>"), h.indexOf("</style>"));
+  check("css: .mt is the milestone text only (12.5px, not the nameplate)", /\.mt, \.ft \{[^}]*12\.5/.test(css) && !/\.mt \{[^}]*clamp/.test(css));
 }
 
 // ---- help_wanted
