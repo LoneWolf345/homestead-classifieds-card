@@ -1,0 +1,94 @@
+  # The Homestead Times — daily classified-ad copy for homestead-classifieds-card.
+  # Regenerates at 00:05 (or on event `homestead_classifieds_refresh`). Every key has a
+  # built-in fallback in the card, so a failed call only means yesterday's copy stays.
+  - trigger:
+      - platform: time
+        at: "00:05:00"
+      - platform: event
+        event_type: homestead_classifieds_refresh
+    action:
+      - variables:
+          recent: "{{ state_attr('sensor.homestead_classifieds', 'history') or [] }}"
+          facts: >-
+            Chore assignments today: {% for k in ['dish_load','dish_unload','dog_water','dog_feed','vacuum','mop','dog_poop'] %}{{ k }} = {{ states('input_select.chore_' ~ k ~ '_turn') }}{{ '; ' if not loop.last }}{% endfor %}.
+            Maintenance due or overdue: {{ states.sensor | selectattr('attributes.parent_object', 'defined') | selectattr('state', 'in', ['due_soon', 'overdue', 'triggered']) | map(attribute='name') | list | join(', ') or 'nothing' }}.
+            Outdoors {{ states('sensor.weather_station_temperature') | round(0) }} F with gusts to {{ states('sensor.weather_station_wind_gust') | round(0) }} mph.
+            James's internet is {{ 'paused' if is_state('switch.james_devices_paused', 'on') else 'on' }}; Henry's is {{ 'paused' if is_state('switch.henrys_devices_paused', 'on') else 'on' }}.
+      - action: ai_task.generate_data
+        data:
+          entity_id: ai_task.claude_ai_task
+          task_name: homestead_times_classifieds
+          instructions: >-
+            You write the classified-ad and public-notice copy for "The Homestead Times",
+            a deadpan, tongue-in-cheek household newspaper published by a Home Assistant
+            smart home in Maricopa, Arizona: a family with two boys (James and Henry) whose
+            chores are tracked by automations and paid for in internet access, a pool, a
+            drip-irrigation yard, a backyard weather station, an eero mesh on Cox internet,
+            MQTT-fed clocks, a Tesla, and monsoon season. Voice: dry, understated, newspaper
+            classifieds; sentence case; no emoji; no quotation marks; never mention AI.
+            Today's facts (use lightly, never invent people): {{ facts }}
+            Write each field fresh. The seven ad_* fields are the BODY of a classified ad
+            that continues directly after a printed lead-in, so start lowercase and make the
+            sentence read on from the lead-in, under 90 characters each:
+            ad_dish_load follows "DISHES," (example: dirty, seeking transport to the dishwasher. Must lift five pounds.);
+            ad_dish_unload follows "DISHWASHER," (example: full, to be emptied. Clean plates seeking homes.);
+            ad_dog_water follows "WATER BOWL," (example: refill as needed. Inquire with dog.);
+            ad_dog_feed follows "DOG," and dinner is at 5:30 PM (example: hungry, seeks feeding at 5:30 PM. Will work for kibble.);
+            ad_vacuum follows "VACUUM OPERATOR" (example: wanted, ground floor. Experience with dog hair a plus.);
+            ad_mop follows "MOP," (example: weekly engagement. Water provided.);
+            ad_dog_poop follows "YARD," (example: requires inspection. Gloves recommended. No experience necessary; none possible.).
+            calendar_empty: one line printed under a day with no events, under 70 characters
+            (example: Nothing on the docket. Staff remain on standby.).
+            calendar_footer: one line under the calendar, under 100 characters, may include the
+            token {n} for the number of calendars (example: Compiled from {n} calendars. All events weather permitting, which it is.).
+            help_wanted_empty: one line when every chore is done, under 80 characters.
+            help_wanted_footer: a rates-and-terms line for the help-wanted column, under 150 characters
+            (example: Rates: 25 cents per word, payable in Wi-Fi. Service resumes upon fulfilment of all positions.).
+            notices_empty: one line when no maintenance is due, under 80 characters.
+            wanted_empty: one line when the to-do lists are empty, under 70 characters.
+            notices_footer: one legal-notice style line, under 100 characters
+            (example: Notices remain in force until acted upon, which is rather the problem.).
+            correction: one deadpan newspaper CORRECTION about the household, one or two sentences,
+            under 170 characters, grounded in today's facts, ending with a variation of
+            "The Times regrets the error."
+            Never reuse or closely paraphrase any of these recent lines: {{ recent | join(' | ') }}
+          structure:
+            ad_dish_load: {description: "Ad body after DISHES,", required: true, selector: {text:}}
+            ad_dish_unload: {description: "Ad body after DISHWASHER,", required: true, selector: {text:}}
+            ad_dog_water: {description: "Ad body after WATER BOWL,", required: true, selector: {text:}}
+            ad_dog_feed: {description: "Ad body after DOG,", required: true, selector: {text:}}
+            ad_vacuum: {description: "Ad body after VACUUM OPERATOR", required: true, selector: {text:}}
+            ad_mop: {description: "Ad body after MOP,", required: true, selector: {text:}}
+            ad_dog_poop: {description: "Ad body after YARD,", required: true, selector: {text:}}
+            calendar_empty: {description: "Empty-day line", required: true, selector: {text:}}
+            calendar_footer: {description: "Calendar footer line", required: true, selector: {text:}}
+            help_wanted_empty: {description: "All-chores-done line", required: true, selector: {text:}}
+            help_wanted_footer: {description: "Help-wanted rates line", required: true, selector: {text:}}
+            notices_empty: {description: "Nothing-due line", required: true, selector: {text:}}
+            wanted_empty: {description: "Empty to-do line", required: true, selector: {text:}}
+            notices_footer: {description: "Notices footer line", required: true, selector: {text:}}
+            correction: {description: "Correction box text", required: true, selector: {text:}}
+        response_variable: result
+    sensor:
+      - name: "Homestead Classifieds"
+        unique_id: homestead_classifieds
+        icon: mdi:newspaper-variant-multiple
+        state: "{{ now().strftime('%Y-%m-%d') }}"
+        attributes:
+          ad_dish_load: "{{ (result.data.ad_dish_load | trim)[:200] }}"
+          ad_dish_unload: "{{ (result.data.ad_dish_unload | trim)[:200] }}"
+          ad_dog_water: "{{ (result.data.ad_dog_water | trim)[:200] }}"
+          ad_dog_feed: "{{ (result.data.ad_dog_feed | trim)[:200] }}"
+          ad_vacuum: "{{ (result.data.ad_vacuum | trim)[:200] }}"
+          ad_mop: "{{ (result.data.ad_mop | trim)[:200] }}"
+          ad_dog_poop: "{{ (result.data.ad_dog_poop | trim)[:200] }}"
+          calendar_empty: "{{ (result.data.calendar_empty | trim)[:200] }}"
+          calendar_footer: "{{ (result.data.calendar_footer | trim)[:200] }}"
+          help_wanted_empty: "{{ (result.data.help_wanted_empty | trim)[:200] }}"
+          help_wanted_footer: "{{ (result.data.help_wanted_footer | trim)[:250] }}"
+          notices_empty: "{{ (result.data.notices_empty | trim)[:200] }}"
+          wanted_empty: "{{ (result.data.wanted_empty | trim)[:200] }}"
+          notices_footer: "{{ (result.data.notices_footer | trim)[:200] }}"
+          correction: "{{ (result.data.correction | trim)[:300] }}"
+          history: "{{ ((result.data.values() | map('trim') | list) + (state_attr('sensor.homestead_classifieds', 'history') or []))[:100] }}"
+          generated: "{{ now().isoformat() }}"
