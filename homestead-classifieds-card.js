@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.2";
+const HCC_VERSION = "2026.8.3";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -88,9 +88,19 @@ class HomesteadClassifiedsCard extends HTMLElement {
   // ---------- render plumbing ----------
   _render() {
     if (!this._cfg || !this._hass) return;
+    // Height memory: until the mode's data has arrived, hold the last rendered height so a
+    // page scrolled during load doesn't jump (WebKit has no scroll anchoring; Chrome's is
+    // defeated by innerHTML re-renders). The calendar shows only its kicker while loading.
+    const loaded = this._loaded();
+    const reserve = loaded ? 0 : this._reserve();
+    this.style.minHeight = reserve ? reserve + "px" : "";
     let out;
     try {
-      out = this._cfg.mode === "calendar" ? this._calendar() : this._cfg.mode === "help_wanted" ? this._helpWanted() : this._notices();
+      if (!loaded && this._cfg.mode === "calendar") {
+        out = { sig: "loading", html: this._shell("COMMUNITY CALENDAR", this._cfg.days === 2 ? "TODAY & TOMORROW" : `NEXT ${this._cfg.days} DAYS`, "", "") };
+      } else {
+        out = this._cfg.mode === "calendar" ? this._calendar() : this._cfg.mode === "help_wanted" ? this._helpWanted() : this._notices();
+      }
     } catch (e) {
       out = { sig: "err:" + e.message, html: `<div style="padding:12px;color:#b00;font-family:sans-serif">${esc(e.message)}</div>` };
     }
@@ -98,7 +108,17 @@ class HomesteadClassifiedsCard extends HTMLElement {
     this._sig = out.sig;
     this.shadowRoot.innerHTML = out.html;
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.entity)));
+    if (loaded) requestAnimationFrame(() => this._remember());
   }
+  _loaded() {
+    const c = this._cfg;
+    if (c.mode === "calendar") return this._fetchedAt > 0;
+    if (c.mode === "notices") return !c.todo_lists.length || this._todoAt > 0;
+    return true;
+  }
+  _hkey() { const c = this._cfg; return "hcc-h:" + c.mode + ":" + (c.calendars || []).map((x) => x.entity).join(",") + ":" + (c.todo_lists || []).join(","); }
+  _reserve() { try { const v = parseInt(localStorage.getItem(this._hkey()), 10); return v > 40 ? v : 0; } catch (e) { return 0; } }
+  _remember() { try { const h = Math.round(this.getBoundingClientRect().height); if (h > 40) localStorage.setItem(this._hkey(), String(h)); } catch (e) { /* storage unavailable */ } }
   _more(entityId) {
     if (!entityId) return;
     this.dispatchEvent(new CustomEvent("hass-more-info", { bubbles: true, composed: true, detail: { entityId } }));

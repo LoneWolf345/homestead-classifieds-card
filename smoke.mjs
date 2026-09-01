@@ -1,9 +1,10 @@
 // smoke.mjs — node harness for homestead-classifieds-card (no browser, no framework)
 import fs from "node:fs"; import vm from "node:vm";
 const src = fs.readFileSync(new URL("./homestead-classifieds-card.js", import.meta.url), "utf8");
-class HTMLElement { constructor() { this._sr = null; } attachShadow() { this._sr = { innerHTML: "", querySelectorAll: () => [] }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} }
-const defs = {};
-const ctx = { HTMLElement, customElements: { define: (n, c) => (defs[n] = c), get: (n) => defs[n] }, document: { getElementById: () => null, createElement: () => ({}), head: { appendChild() {} } }, console, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, setInterval: () => 0, clearInterval() {}, setTimeout, Date };
+class HTMLElement { constructor() { this._sr = null; this.style = {}; this._h = 300; } attachShadow() { this._sr = { innerHTML: "", querySelectorAll: () => [] }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} getBoundingClientRect() { return { height: this._h }; } }
+const defs = {}; const store = new Map();
+const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+const ctx = { HTMLElement, customElements: { define: (n, c) => (defs[n] = c), get: (n) => defs[n] }, document: { getElementById: () => null, createElement: () => ({}), head: { appendChild() {} } }, console, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, setInterval: () => 0, clearInterval() {}, setTimeout, Date, localStorage, requestAnimationFrame: (f) => setTimeout(f, 0) };
 ctx.window = ctx; vm.createContext(ctx); vm.runInContext(src, ctx);
 const Card = defs["homestead-classifieds-card"];
 let fails = 0;
@@ -35,6 +36,27 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   check("calendar: location line", h.includes('class="loc">Copper Sky'));
   check("calendar: milestone age", h.includes(`Jim turns ${tomorrow.getFullYear() - 1960} tomorrow.`));
   check("calendar: footer counts calendars", h.includes("Compiled from 2 calendars"));
+}
+
+// ---- height memory (load-time layout shift guard)
+{
+  const el = new Card(); el.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
+  el.hass = mkHass({}, () => new Promise(() => {})); // fetch never resolves
+  const h = el.shadowRoot.innerHTML;
+  check("hm: calendar shows kicker only while loading", h.includes("COMMUNITY CALENDAR") && !h.includes("Nothing on the docket") && !h.includes("TODAY<"));
+  check("hm: no reservation on first ever load", el.style.minHeight === "");
+  store.set("hcc-h:calendar:calendar.x:", "480");
+  const el2 = new Card(); el2.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
+  el2.hass = mkHass({}, () => new Promise(() => {}));
+  check("hm: reserves remembered height while loading", el2.style.minHeight === "480px");
+  const el3 = new Card(); el3._h = 512; el3.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
+  el3.hass = mkHass({}, async () => []); await tick(); await tick();
+  check("hm: releases reservation once loaded", el3.style.minHeight === "" && el3.shadowRoot.innerHTML.includes("Nothing on the docket"));
+  check("hm: remembers rendered height", store.get("hcc-h:calendar:calendar.x:") === "512");
+  const el4 = new Card(); el4.setConfig({ mode: "notices", todo_lists: ["todo.a"] });
+  store.set("hcc-h:notices::todo.a", "388");
+  el4.hass = mkHass({ "todo.a": { state: "0", attributes: {} } }, null, () => new Promise(() => {}));
+  check("hm: notices reserves until to-dos answer", el4.style.minHeight === "388px" && el4.shadowRoot.innerHTML.includes("PUBLIC NOTICES"));
 }
 
 // ---- help_wanted
