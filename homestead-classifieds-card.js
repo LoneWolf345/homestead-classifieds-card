@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.8";
+const HCC_VERSION = "2026.8.9";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -85,7 +85,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
   }
   getCardSize() { return 6; }
   connectedCallback() {
-    this._tick = setInterval(() => { this._sig = null; this._render(); }, 60000);
+    this._tick = setInterval(() => this._render(), 60000); // re-renders only if the content changed (NOW/past flips, day roll)
     if (typeof ResizeObserver !== "undefined" && !this._ro) { this._ro = new ResizeObserver(() => this._fitTitle()); this._ro.observe(this); }
   }
   disconnectedCallback() { clearInterval(this._tick); if (this._ro) { this._ro.disconnect(); this._ro = null; } }
@@ -120,11 +120,18 @@ class HomesteadClassifiedsCard extends HTMLElement {
     }
     if (out.sig === this._sig) return;
     this._sig = out.sig;
+    this._pin();
     this.shadowRoot.innerHTML = out.html;
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.entity)));
     if (this._cfg.mode === "masthead") this._fitTitle();
+    this._unpin(reserve);
     if (loaded) setTimeout(() => this._remember(), 60);
   }
+  // WebKit clamps the scroll position the instant a card's old content is removed for a
+  // re-render (before the new content is laid out), which scrolls a page that is at the
+  // bottom up by the card's height. Pin the host at its current height across the swap.
+  _pin() { try { const h = Math.round(this.getBoundingClientRect().height); if (h > 0) this.style.minHeight = Math.max(h, parseFloat(this.style.minHeight) || 0) + "px"; } catch (e) { /* not in a document */ } }
+  _unpin(reserve) { setTimeout(() => { this.style.minHeight = reserve ? reserve + "px" : ""; }, 0); }
   _loaded() {
     const c = this._cfg;
     if (!this._fontsReady) return false;

@@ -44,10 +44,12 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   el.hass = mkHass({}, () => new Promise(() => {})); // fetch never resolves
   const h = el.shadowRoot.innerHTML;
   check("hm: calendar shows kicker only while loading", h.includes("COMMUNITY CALENDAR") && !h.includes("Nothing on the docket") && !h.includes("TODAY<"));
-  check("hm: no reservation on first ever load", el.style.minHeight === "");
+  check("hm: pinned at current height during the swap", el.style.minHeight === "300px");
+  await tick();
+  check("hm: no reservation on first ever load (after the swap tick)", el.style.minHeight === "");
   store.set("hcc-h:calendar:calendar.x:", "480");
   const el2 = new Card(); el2.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
-  el2.hass = mkHass({}, () => new Promise(() => {}));
+  el2.hass = mkHass({}, () => new Promise(() => {})); await tick();
   check("hm: reserves remembered height while loading", el2.style.minHeight === "480px");
   const el3 = new Card(); el3._h = 512; el3.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
   el3.hass = mkHass({}, async () => []); await tick(); await tick(); await new Promise((r) => setTimeout(r, 120));
