@@ -59,6 +59,22 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   check("hm: notices reserves until to-dos answer", el4.style.minHeight === "388px" && el4.shadowRoot.innerHTML.includes("PUBLIC NOTICES"));
 }
 
+// ---- masthead / colophon
+{
+  const el = new Card(); el.setConfig({ mode: "masthead", title: "The Homestead Times", place: "Maricopa, Arizona", price: "Two bits", tagline_entity: "sensor.homestead_tagline", tagline_fallback: "Fallback line" });
+  el.hass = mkHass({ "sensor.homestead_tagline": { state: "Opinions expressed are those of the automations", attributes: {} } });
+  const h = el.shadowRoot.innerHTML; const doy = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+  check("mast: title + vol/no + place + price", h.includes("The Homestead Times") && h.includes(`VOL. ${today.getFullYear() % 10}, No. ${doy} · MARICOPA, ARIZONA · PRICE: TWO BITS`));
+  check("mast: tagline from sensor", h.includes("Opinions expressed are those of the automations"));
+  check("mast: no reservation needed (sync)", el.style.minHeight === "");
+  const el2 = new Card(); el2.setConfig({ mode: "masthead", tagline_entity: "sensor.homestead_tagline", tagline_fallback: "Fallback line" });
+  el2.hass = mkHass({ "sensor.homestead_tagline": { state: "unknown", attributes: {} } });
+  check("mast: fallback tagline when sensor unknown", el2.shadowRoot.innerHTML.includes("Fallback line"));
+  const el3 = new Card(); el3.setConfig({ mode: "colophon", lead: "Published every minute by Home Assistant", text: "Set in Fraunces and Archivo" });
+  el3.hass = mkHass({});
+  check("colophon: lead + text", el3.shadowRoot.innerHTML.includes("<strong>Published every minute by Home Assistant</strong> — Set in Fraunces and Archivo"));
+}
+
 // ---- help_wanted
 {
   const el = new Card(); el.setConfig({ mode: "help_wanted" });

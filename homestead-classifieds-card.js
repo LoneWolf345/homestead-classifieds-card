@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.4";
+const HCC_VERSION = "2026.8.5";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -48,9 +48,10 @@ class HomesteadClassifiedsCard extends HTMLElement {
   static getStubConfig() { return { mode: "calendar", calendars: [{ entity: "calendar.family", name: "Family" }] }; }
 
   setConfig(config) {
-    if (!config || !["calendar", "help_wanted", "notices"].includes(config.mode)) throw new Error("homestead-classifieds-card: set mode: calendar | help_wanted | notices");
+    if (!config || !["calendar", "help_wanted", "notices", "masthead", "colophon"].includes(config.mode)) throw new Error("homestead-classifieds-card: set mode: calendar | help_wanted | notices | masthead | colophon");
     const c = Object.assign({
       title: "", subtitle: "", column_rule: false, copy_entity: "sensor.homestead_classifieds", footer: "",
+      place: "", price: "", tagline_entity: "", tagline_fallback: "", lead: "", text: "",
       calendars: [], days: 2, milestones_entity: "", milestone_days: 14, show_location: true,
       chores: null, due_entity: "sensor.chores_due", close_time: "8:00 AM",
       maintenance: true, todo_lists: [], flags_prefix: "input_boolean.maint_", forthcoming_days: 7, correction: true,
@@ -99,7 +100,8 @@ class HomesteadClassifiedsCard extends HTMLElement {
       if (!loaded && this._cfg.mode === "calendar") {
         out = { sig: "loading", html: this._shell("COMMUNITY CALENDAR", this._cfg.days === 2 ? "TODAY & TOMORROW" : `NEXT ${this._cfg.days} DAYS`, "", "") };
       } else {
-        out = this._cfg.mode === "calendar" ? this._calendar() : this._cfg.mode === "help_wanted" ? this._helpWanted() : this._notices();
+        const m = this._cfg.mode;
+        out = m === "calendar" ? this._calendar() : m === "help_wanted" ? this._helpWanted() : m === "notices" ? this._notices() : m === "masthead" ? this._masthead() : this._colophon();
       }
     } catch (e) {
       out = { sig: "err:" + e.message, html: `<div style="padding:12px;color:#b00;font-family:sans-serif">${esc(e.message)}</div>` };
@@ -302,6 +304,25 @@ class HomesteadClassifiedsCard extends HTMLElement {
     return { sig: body + footer, html: this._shell("PUBLIC NOTICES", `Nº ${doy}`, body, footer) };
   }
 
+  // ---------- mode: masthead / colophon (synchronous — no late growth, no template wait) ----------
+  _masthead() {
+    const c = this._cfg, now = new Date();
+    const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+    const tagE = c.tagline_entity ? this._hass.states[c.tagline_entity] : null;
+    const tag = tagE && !bad(tagE.state) ? tagE.state : (c.tagline_fallback || "");
+    const date = `${DAYS[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`.toUpperCase();
+    const rest = [`VOL. ${now.getFullYear() % 10}, No. ${doy}`].concat(c.place ? [c.place.toUpperCase()] : [], c.price ? [`PRICE: ${c.price.toUpperCase()}`] : []).join(" · ");
+    const body = `<h1 class="mt">${esc(c.title || "The Homestead Times")}</h1>
+      <div class="dl"><span>${esc(date)}</span><span class="sep">·</span><span>${esc(rest)}</span></div>
+      ${tag ? `<div class="tg"${c.tagline_entity ? ` data-entity="${esc(c.tagline_entity)}"` : ""}>${esc(tag)}</div>` : ""}`;
+    return { sig: body, html: `<style>${this._css()}</style><div class="wrap"><div class="card mast">${body}</div></div>` };
+  }
+  _colophon() {
+    const c = this._cfg;
+    const body = `<div class="corule"></div><div class="co">${c.lead ? `<strong>${esc(c.lead)}</strong> — ` : ""}${esc(c.text || "")}</div>`;
+    return { sig: body, html: `<style>${this._css()}</style><div class="wrap"><div class="card colo">${body}</div></div>` };
+  }
+
   // ---------- styles (almanac tokens) ----------
   _css() {
     const c = this._cfg;
@@ -344,7 +365,16 @@ class HomesteadClassifiedsCard extends HTMLElement {
   .strike path { fill: none; stroke: ${GRAPHITE}; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .78; }
   .corr { margin-top: calc(10*var(--px)); font-family: Fraunces, Georgia, serif; font-style: italic; font-size: max(8px, calc(10.5*var(--px))); color: ${BROWN}; line-height: 1.4; }
   .corr b { font-style: normal; font-weight: 700; letter-spacing: .3px; }
-  .foot { font-size: max(7px, calc(9*var(--px))); letter-spacing: .3px; color: ${TAN}; margin-top: calc(12*var(--px)); line-height: 1.5; }`;
+  .foot { font-size: max(7px, calc(9*var(--px))); letter-spacing: .3px; color: ${TAN}; margin-top: calc(12*var(--px)); line-height: 1.5; }
+  .card.mast, .card.colo { padding: 4px 16px 10px; text-align: center; color: #2b2118; }
+  .mt { font-family: Fraunces, Georgia, serif; font-size: clamp(22px, 9cqw, 52px); font-weight: 900; letter-spacing: 1px; line-height: 1.05; white-space: nowrap; margin: 8px 0 6px; padding: 14px 0 10px; border-top: 4px double #2b2118; border-bottom: 1px solid #2b2118; }
+  .dl { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 10px; row-gap: 3px; font-family: Archivo, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; padding: 7px 0 8px; border-bottom: 3px double #2b2118; }
+  .dl span { white-space: nowrap; }
+  .tg { font-family: Fraunces, Georgia, serif; font-style: italic; font-size: 15px; color: #5a4632; margin-top: 10px; cursor: pointer; text-wrap: balance; }
+  .corule { border-top: 3px double #2b2118; margin: 4px 0 12px; }
+  .co { font-family: Archivo, 'Segoe UI', sans-serif; font-size: 10.5px; letter-spacing: 1.5px; color: #5a4632; text-transform: uppercase; line-height: 1.7; }
+  .co strong { color: #2b2118; }
+  @container (max-width: 560px) { .dl { flex-direction: column; font-size: 10px; letter-spacing: 2px; } .dl .sep { display: none; } .tg { font-size: 14px; } .co { font-size: 9.5px; letter-spacing: 1px; } }`;
   }
 }
 

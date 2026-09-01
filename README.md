@@ -6,7 +6,11 @@ Three newsprint cards for Home Assistant — a companion to the [Almanac Weather
 - **`help_wanted`** — the kids' chores as classified ads, grouped by whose turn it is. Open chores read "OPEN · Applications close 8:00 AM"; chores logged today are pencilled out with the time they were filled.
 - **`notices`** — Maintenance Supporter tasks as legal notices ("Notice is hereby given that watering of the Houseplants falls due this day…"), open to-dos under WANTED, a FORTHCOMING line for the week, and a CORRECTION box.
 
+- **`masthead`** / **`colophon`** — a newspaper nameplate (title, dateline with Vol. = last digit of the year and No. = day of the year, place, price, a tagline from any sensor) and a footer line. They render synchronously from `hass` — unlike a template markdown card they never paint late, so the page doesn't jump on phones — and the title scales with the column width.
+
 Read-only by design: tap any line for its more-info dialog. Nothing on the page completes anything.
+
+All modes remember their rendered height per device and reserve it on the next load until their data is back (WebKit has no scroll anchoring, so a page scrolled during load would otherwise jump when late content fills in).
 
 <img src="docs/front-page.png" width="720" alt="The three cards on a newsprint dashboard">
 
@@ -68,6 +72,9 @@ forthcoming_days: 7
 | `flags_prefix` | notices | `input_boolean.maint_` | Booleans that are on print as standing orders |
 | `forthcoming_days` | notices | `7` | |
 | `correction` | notices | `true` | Print the `correction` attribute when present |
+| `title`, `place`, `price` | masthead | `The Homestead Times`, `''`, `''` | Nameplate text; place/price join the dateline |
+| `tagline_entity`, `tagline_fallback` | masthead | `''` | Sensor whose state is the tagline; fallback text when unavailable |
+| `lead`, `text` | colophon | `''` | Bold lead-in and the small-caps footer line |
 
 ## Theming
 
