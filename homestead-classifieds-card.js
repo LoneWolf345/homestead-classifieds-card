@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.6";
+const HCC_VERSION = "2026.8.7";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -52,6 +52,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const c = Object.assign({
       title: "", subtitle: "", column_rule: false, copy_entity: "sensor.homestead_classifieds", footer: "",
       place: "", price: "", tagline_entity: "", tagline_fallback: "", lead: "", text: "",
+      probe: 0, probe_entity: "sensor.homestead_scroll_probe",
       calendars: [], days: 2, milestones_entity: "", milestone_days: 14, show_location: true,
       chores: null, due_entity: "sensor.chores_due", close_time: "8:00 AM",
       maintenance: true, todo_lists: [], flags_prefix: "input_boolean.maint_", forthcoming_days: 7, correction: true,
@@ -77,6 +78,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._cfg.probe > 0 && !this._probing) this._startProbe(this._cfg.probe);
     if (this._cfg.mode === "calendar") this._maybeFetchCalendars();
     if (this._cfg.mode === "notices" && this._cfg.todo_lists.length) this._maybeFetchTodos();
     this._render();
@@ -326,6 +328,46 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const footer = c.footer || this._copy("notices_footer", FALLBACK.notices_footer);
     const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
     return { sig: body + footer, html: this._shell("PUBLIC NOTICES", `Nº ${doy}`, body, footer) };
+  }
+
+  // ---------- diagnostics: `probe: <seconds>` records the page's scroll/height timeline and posts
+  // it to `probe_entity` (REST states API) so a phone's behaviour can be read from anywhere ----------
+  _startProbe(secs) {
+    this._probing = true;
+    if (typeof window === "undefined" || window.__hccProbe) return;
+    window.__hccProbe = true;
+    const sc = document.scrollingElement || document.documentElement, t0 = Date.now(), log = [], touches = [];
+    const heights = () => {
+      const out = [];
+      const walk = (n) => { if (!n || n.nodeType !== 1) return; const tag = n.tagName.toLowerCase();
+        if ((/-card$/.test(tag) && tag !== "hui-card" && tag !== "ha-card") || tag === "hui-view") out.push([tag.replace(/-card$/, "") + (n.getAttribute && n.getAttribute("mode") ? ":" + n.getAttribute("mode") : ""), Math.round(n.getBoundingClientRect().height), n.style && n.style.minHeight ? n.style.minHeight : ""]);
+        if (n.shadowRoot) for (const c of n.shadowRoot.children) walk(c); for (const c of n.children) walk(c); };
+      walk(document.querySelector("home-assistant")); return out;
+    };
+    let last = { top: -1, h: -1, ih: -1 };
+    const onT = (k) => () => { if (touches.length < 150) touches.push([k, Date.now() - t0, Math.round(sc.scrollTop)]); };
+    window.addEventListener("touchstart", onT("s"), { passive: true });
+    window.addEventListener("touchend", onT("e"), { passive: true });
+    const iv = setInterval(() => {
+      const top = Math.round(sc.scrollTop), h = sc.scrollHeight, ih = window.innerHeight;
+      if (top !== last.top || h !== last.h || ih !== last.ih) {
+        const e = [Date.now() - t0, top, h, ih];
+        if ((h !== last.h || ih !== last.ih) && log.length < 120) e.push(heights());
+        if (log.length < 400) log.push(e);
+        last = { top, h, ih };
+      }
+    }, 100);
+    setTimeout(async () => {
+      clearInterval(iv);
+      let ls = [];
+      try { ls = Object.keys(localStorage).filter((k) => /-h:/.test(k)).map((k) => k.slice(0, 26) + "=" + localStorage.getItem(k)); } catch (e) { ls = ["localStorage unavailable"]; }
+      const run = { at: new Date(t0).toISOString(), ua: navigator.userAgent.slice(0, 90), w: window.innerWidth, h: window.innerHeight, vis: document.visibilityState, restore: history.scrollRestoration, ls, touches, log, final: heights() };
+      try {
+        const prev = (this._hass.states[this._cfg.probe_entity] || {}).attributes || {};
+        const runs = [run].concat(prev.runs || []).slice(0, 3);
+        await this._hass.callApi("POST", `states/${this._cfg.probe_entity}`, { state: new Date().toISOString(), attributes: { runs } });
+      } catch (e) { /* probe is best-effort */ }
+    }, secs * 1000);
   }
 
   // ---------- mode: masthead / colophon (synchronous — no late growth, no template wait) ----------
