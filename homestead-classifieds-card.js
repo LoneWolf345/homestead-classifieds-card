@@ -5,7 +5,7 @@
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.1";
+const HCC_VERSION = "2026.8.2";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -320,7 +320,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
   .meta .open, .meta .due { color: ${TERRA}; }
   .meta .late { color: ${RED}; }
   .done { color: ${BROWN}; }
-  .strike { position: absolute; left: -4px; top: 4px; width: calc(100% + 8px); height: calc(100% - 8px); pointer-events: none; mix-blend-mode: multiply; }
+  .strike { position: absolute; left: -4px; top: 3px; width: calc(100% + 8px); height: calc(100% - 24px); pointer-events: none; mix-blend-mode: multiply; }
   .strike path { fill: none; stroke: ${GRAPHITE}; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .78; }
   .corr { margin-top: calc(10*var(--px)); font-family: Fraunces, Georgia, serif; font-style: italic; font-size: max(8px, calc(10.5*var(--px))); color: ${BROWN}; line-height: 1.4; }
   .corr b { font-style: normal; font-weight: 700; letter-spacing: .3px; }
