@@ -1,11 +1,13 @@
-/* homestead-classifieds-card — three newsprint cards for Home Assistant, companions to
+/* homestead-classifieds-card — the small newsprint cards for Home Assistant, companions to
  * almanac-weather-card / network-ledger-card.
  *   mode: calendar     — today & tomorrow's events + next milestone
  *   mode: help_wanted  — kids' chores as classified ads, grouped by whose turn
  *   mode: notices      — maintenance (Maintenance Supporter) + to-dos as public notices
+ *   mode: masthead     — the paper's nameplate, dateline and tagline
+ *   mode: colophon     — the footer line
  * Read-only: tapping a line opens more-info. Copy: attributes of `copy_entity`
  * (a daily AI sensor) with a built-in fallback for every line. */
-const HCC_VERSION = "2026.8.9";
+const HCC_VERSION = "2026.9.1";
 const INK = "#3a2d1f", PAPER = "#f3e7d3", TAN = "#a3876a", BROWN = "#7a6248",
   TERRA = "#c65f38", DOT = "#cfb894", RED = "#7e1d10", GRAPHITE = "#55504a";
 
@@ -42,7 +44,10 @@ const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDat
 const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : (["th", "st", "nd", "rd"][n % 10] || "th"));
 const clock = (d) => { let h = d.getHours(); const m = pad2(d.getMinutes()); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${m} ${ap}`; };
 const strike = (i) => `<svg class="strike" viewBox="0 0 520 40" preserveAspectRatio="none"><path d="${STRIKES[i % STRIKES.length]}"/></svg>`;
-const bad = (s) => !s || s === "unknown" || s === "unavailable";
+const bad = (s) => s == null || s === "" || s === "unknown" || s === "unavailable";
+const dateOnly = (v) => String(v ?? "").slice(0, 10); // a next_due of "2026-09-14T00:00:00+00:00" must still parse as the day
+// day of the year from local midnight, rounded so a DST hour cannot shave a day off
+const dayOfYear = (d) => { const d0 = new Date(d); d0.setHours(0, 0, 0, 0); return Math.round((d0 - new Date(d0.getFullYear(), 0, 0)) / 86400000); };
 
 class HomesteadClassifiedsCard extends HTMLElement {
   static getStubConfig() { return { mode: "calendar", calendars: [{ entity: "calendar.family", name: "Family" }] }; }
@@ -66,6 +71,8 @@ class HomesteadClassifiedsCard extends HTMLElement {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this._sig = null; this._events = []; this._miles = null; this._todos = [];
     this._fetchedAt = 0; this._fetchDay = ""; this._todoAt = 0; this._todoStamp = null;
+    // a new config retires any fetch still in flight: its result is checked against this number after every await
+    this._fetchSeq = (this._fetchSeq || 0) + 1; this._fetching = false; this._todoFetching = false;
     // Web fonts reflow the text after first paint; keep the height reservation until they
     // are in (3 s cap so a blocked font host never holds the page).
     if (this._fontsReady === undefined) {
@@ -78,6 +85,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._cfg) return; // HA calls setConfig first; an editor or harness may not
     if (this._cfg.probe > 0 && !this._probing) this._startProbe(this._cfg.probe);
     if (this._cfg.mode === "calendar") this._maybeFetchCalendars();
     if (this._cfg.mode === "notices" && this._cfg.todo_lists.length) this._maybeFetchTodos();
@@ -122,7 +130,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
     this._sig = out.sig;
     this._pin();
     this.shadowRoot.innerHTML = out.html;
-    this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", () => this._more(el.dataset.entity)));
+    this.shadowRoot.querySelectorAll("[data-entity]").forEach((el) => el.addEventListener("click", (ev) => { ev.stopPropagation(); this._more(el.dataset.entity); }));
     if (this._cfg.mode === "masthead") this._fitTitle();
     this._unpin(reserve);
     if (loaded) setTimeout(() => this._remember(), 60);
@@ -171,12 +179,15 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const day = ymd(new Date());
     if (this._fetching || (Date.now() - this._fetchedAt < 300000 && this._fetchDay === day)) return;
     this._fetching = true;
+    const seq = this._fetchSeq;
     try {
+      // calendar days via setDate(), so a 23- or 25-hour day keeps the window on midnights
       const start = new Date(); start.setHours(0, 0, 0, 0);
-      const end = new Date(start.getTime() + this._cfg.days * 86400000);
+      const end = new Date(start); end.setDate(start.getDate() + this._cfg.days);
       const q = (a, b) => `?start=${encodeURIComponent(a.toISOString())}&end=${encodeURIComponent(b.toISOString())}`;
       const lists = await Promise.all(this._cfg.calendars.map((c) =>
         this._hass.callApi("GET", `calendars/${c.entity}${q(start, end)}`).then((r) => r.map((ev) => this._norm(ev, c))).catch(() => null)));
+      if (seq !== this._fetchSeq) return;
       if (lists.some((l) => l)) {
         const merged = [];
         lists.forEach((l) => (l || []).forEach((ev) => {
@@ -186,14 +197,16 @@ class HomesteadClassifiedsCard extends HTMLElement {
         this._events = merged;
       }
       if (this._cfg.milestones_entity) {
-        const mend = new Date(start.getTime() + this._cfg.milestone_days * 86400000);
+        const mend = new Date(start); mend.setDate(start.getDate() + this._cfg.milestone_days);
         const mc = { entity: this._cfg.milestones_entity, name: "Milestone" };
-        this._miles = await this._hass.callApi("GET", `calendars/${mc.entity}${q(start, mend)}`)
+        const miles = await this._hass.callApi("GET", `calendars/${mc.entity}${q(start, mend)}`)
           .then((r) => r.map((ev) => this._norm(ev, mc)).sort((a, b) => a.start - b.start)).catch(() => this._miles);
+        if (seq !== this._fetchSeq) return;
+        this._miles = miles;
       }
       this._fetchedAt = Date.now(); this._fetchDay = day;
       this._sig = null; this._render();
-    } finally { this._fetching = false; }
+    } finally { if (seq === this._fetchSeq) this._fetching = false; }
   }
   _norm(ev, c) {
     const allDay = !(ev.start && ev.start.dateTime);
@@ -205,7 +218,10 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const c = this._cfg, now = new Date(), today = new Date(now); today.setHours(0, 0, 0, 0);
     let body = "";
     for (let i = 0; i < c.days; i++) {
-      const day = new Date(today.getTime() + i * 86400000), key = ymd(day), next = new Date(day.getTime() + 86400000);
+      // calendar days via setDate(): on a 25-hour fall-back day ms maths would land "tomorrow" at 23:00 today
+      const day = new Date(today); day.setDate(today.getDate() + i);
+      const next = new Date(day); next.setDate(day.getDate() + 1);
+      const key = ymd(day);
       const tag = i === 0 ? "TODAY" : i === 1 ? "TOMORROW" : DAYS[day.getDay()].toUpperCase();
       const evs = this._events.filter((ev) => (ev.allDay ? ev.start < next && ev.end > day : ymd(ev.start) === key))
         .sort((a, b) => (a.allDay === b.allDay ? a.start - b.start : a.allDay ? -1 : 1));
@@ -225,7 +241,8 @@ class HomesteadClassifiedsCard extends HTMLElement {
       const age = yr ? m.start.getFullYear() - parseInt(yr, 10) : null;
       const isBday = /birthday/i.test(m.title);
       const who = m.title.replace(/['’]s\s+birthday/i, "").replace(/\s*birthday\s*/i, "").trim();
-      const when = ymd(m.start) === ymd(today) ? "today" : ymd(m.start) === ymd(new Date(today.getTime() + 86400000)) ? "tomorrow" : `on ${DAYS[m.start.getDay()]}, ${MON3[m.start.getMonth()]} ${m.start.getDate()}`;
+      const tmrw = new Date(today); tmrw.setDate(today.getDate() + 1);
+      const when = ymd(m.start) === ymd(today) ? "today" : ymd(m.start) === ymd(tmrw) ? "tomorrow" : `on ${DAYS[m.start.getDay()]}, ${MON3[m.start.getMonth()]} ${m.start.getDate()}`;
       const text = isBday && age != null ? `${who} turns ${age} ${when}.` : age != null ? `${m.title}: ${age} years ${when}.` : `${m.title} ${when}.`;
       body += `<div class="mile" data-entity="${esc(m.entity)}"><span class="mk">MILESTONES</span><span class="mt">${esc(text)}</span></div>`;
     }
@@ -269,18 +286,21 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const stamp = this._cfg.todo_lists.map((l) => (this._hass.states[l] || {}).last_updated).join("|");
     if (this._todoFetching || (stamp === this._todoStamp && Date.now() - this._todoAt < 300000)) return;
     this._todoFetching = true;
+    const seq = this._fetchSeq;
     try {
       const all = [];
       for (const l of this._cfg.todo_lists) {
         try {
           const r = await this._hass.callWS({ type: "todo/item/list", entity_id: l });
+          if (seq !== this._fetchSeq) return;
           const name = ((this._hass.states[l] || {}).attributes || {}).friendly_name || l;
           (r.items || []).filter((it) => it.status === "needs_action").forEach((it) => all.push({ title: it.summary || "", list: name, entity: l, due: it.due || "" }));
         } catch (e) { /* that list stays as it was */ }
+        if (seq !== this._fetchSeq) return;
       }
       this._todos = all; this._todoStamp = stamp; this._todoAt = Date.now();
       this._sig = null; this._render();
-    } finally { this._todoFetching = false; }
+    } finally { if (seq === this._fetchSeq) this._todoFetching = false; }
   }
   _notices() {
     const c = this._cfg, st = this._hass.states, today = ymd(new Date()), now = new Date();
@@ -302,12 +322,11 @@ class HomesteadClassifiedsCard extends HTMLElement {
         else if (s.state === "overdue" || (typeof days === "number" && days < 0)) { const n = Math.abs(days || 0); clause = n ? `stands ${n} day${n === 1 ? "" : "s"} in arrears` : "stands in arrears"; lead = n ? `${n} days overdue` : "Overdue"; cls = "late"; }
         else if (days === 0) { clause = `falls due this day, the ${ordinal(now.getDate())} of ${MONTHS[now.getMonth()]}`; lead = "Due today"; }
         else if (days === 1) { clause = "falls due tomorrow"; lead = "Due tomorrow"; }
-        else { const d = a.next_due ? new Date(a.next_due + "T12:00:00") : null; clause = d ? `falls due on the ${DAYS[d.getDay()]} next` : `falls due in ${days} days`; lead = `${days} days`; cls = ""; }
+        else { const d = a.next_due ? new Date(dateOnly(a.next_due) + "T12:00:00") : null; clause = d && !isNaN(d) ? `falls due on the ${DAYS[d.getDay()]} next` : `falls due in ${days} days`; lead = `${days} days`; cls = ""; }
         items.push({ kind: "due", entity: id, rank, days: typeof days === "number" ? days : 999, text: `that ${task} of the ${obj} ${clause}.`, meta: `${lead} · ${obj}`, cls });
       } else if (typeof days === "number" && days > 0 && days <= c.forthcoming_days && a.next_due) {
-        const d = new Date(a.next_due + "T12:00:00"), k = DAYS[d.getDay()];
-        if (!forth.has(k)) forth.set(k, { d, list: [] });
-        forth.get(k).list.push(task);
+        const d = new Date(dateOnly(a.next_due) + "T12:00:00");
+        if (!isNaN(d)) { const k = DAYS[d.getDay()]; if (!forth.has(k)) forth.set(k, { d, list: [] }); forth.get(k).list.push(task); }
       }
     }
     items.sort((x, y) => x.rank - y.rank || x.days - y.days);
@@ -333,8 +352,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
     const corr = c.correction ? this._copy("correction", "") : "";
     if (corr) body += `<div class="corr"><b>CORRECTION</b> — ${esc(corr)}</div>`;
     const footer = c.footer || this._copy("notices_footer", FALLBACK.notices_footer);
-    const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
-    return { sig: body + footer, html: this._shell("PUBLIC NOTICES", `Nº ${doy}`, body, footer) };
+    return { sig: body + footer, html: this._shell("PUBLIC NOTICES", `Nº ${dayOfYear(now)}`, body, footer) };
   }
 
   // ---------- diagnostics: `probe: <seconds>` records the page's scroll/height timeline and posts
@@ -386,8 +404,7 @@ class HomesteadClassifiedsCard extends HTMLElement {
 
   // ---------- mode: masthead / colophon (synchronous — no late growth, no template wait) ----------
   _masthead() {
-    const c = this._cfg, now = new Date();
-    const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+    const c = this._cfg, now = new Date(), doy = dayOfYear(now);
     const tagE = c.tagline_entity ? this._hass.states[c.tagline_entity] : null;
     const tag = tagE && !bad(tagE.state) ? tagE.state : (c.tagline_fallback || "");
     const date = `${DAYS[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}, ${now.getFullYear()}`.toUpperCase();
@@ -458,10 +475,12 @@ class HomesteadClassifiedsCard extends HTMLElement {
   }
 }
 
-if (!document.getElementById("hcc-font")) {
+// One font sheet for every Homestead Times card: the first card to load injects it, the rest find it.
+// (Carries the Fraunces 900 the masthead nameplate is set in.)
+if (!document.getElementById("homestead-times-font")) {
   const l = document.createElement("link");
-  l.id = "hcc-font"; l.rel = "stylesheet";
-  l.href = "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Archivo:wght@400;600;700&display=swap";
+  l.id = "homestead-times-font"; l.rel = "stylesheet";
+  l.href = "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,400&family=Archivo:wght@400;500;600;700&display=swap";
   document.head.appendChild(l);
 }
 customElements.define("homestead-classifieds-card", HomesteadClassifiedsCard);

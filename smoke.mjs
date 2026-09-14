@@ -1,7 +1,8 @@
 // smoke.mjs — node harness for homestead-classifieds-card (no browser, no framework)
 import fs from "node:fs"; import vm from "node:vm";
 const src = fs.readFileSync(new URL("./homestead-classifieds-card.js", import.meta.url), "utf8");
-class HTMLElement { constructor() { this._sr = null; this.style = {}; this._h = 300; } attachShadow() { this._sr = { innerHTML: "", querySelectorAll: () => [], querySelector: () => null }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} getBoundingClientRect() { return { height: this._h }; } }
+// the shadow root counts innerHTML assignments (`_sets`) so the render-dedupe check can see a swap that should not happen
+class HTMLElement { constructor() { this._sr = null; this.style = {}; this._h = 300; this._sets = 0; } attachShadow() { const self = this; let html = ""; this._sr = { get innerHTML() { return html; }, set innerHTML(v) { html = v; self._sets++; }, querySelectorAll: () => [], querySelector: () => null }; return this._sr; } get shadowRoot() { return this._sr; } dispatchEvent() {} getBoundingClientRect() { return { height: this._h }; } }
 const defs = {}; const store = new Map();
 const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
 const ctx = { HTMLElement, customElements: { define: (n, c) => (defs[n] = c), get: (n) => defs[n] }, document: { getElementById: () => null, createElement: () => ({}), head: { appendChild() {} } }, console, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, setInterval: () => 0, clearInterval() {}, setTimeout, Date, localStorage, requestAnimationFrame: (f) => setTimeout(f, 0) };
@@ -65,7 +66,7 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
 {
   const el = new Card(); el.setConfig({ mode: "masthead", title: "The Homestead Times", place: "Maricopa, Arizona", price: "Two bits", tagline_entity: "sensor.homestead_tagline", tagline_fallback: "Fallback line" });
   el.hass = mkHass({ "sensor.homestead_tagline": { state: "Opinions expressed are those of the automations", attributes: {} } });
-  await tick(); const h = el.shadowRoot.innerHTML; const doy = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 86400000);
+  await tick(); const h = el.shadowRoot.innerHTML; const t0 = new Date(today); t0.setHours(0, 0, 0, 0); const doy = Math.round((t0 - new Date(t0.getFullYear(), 0, 0)) / 86400000);
   check("mast: title + vol/no + place + price", h.includes("The Homestead Times") && h.includes(`VOL. ${today.getFullYear() % 10}, No. ${doy} · MARICOPA, ARIZONA · PRICE: TWO BITS`));
   check("mast: tagline from sensor", h.includes("Opinions expressed are those of the automations"));
   check("mast: no reservation needed (sync)", el.style.minHeight === "");
@@ -128,5 +129,45 @@ check("setConfig rejects missing mode", (() => { try { new Card().setConfig({});
   check("nt: forthcoming line", h.includes("FORTHCOMING") && h.includes("mow lawn"));
   check("nt: correction from AI", h.includes("CORRECTION") && h.includes("It is 91°F."));
   check("nt: counts", h.includes("1 STANDING") && h.includes("2 DUE · 1 PERFORMED"));
+}
+
+// ---- hostile strings, unavailable entities, render dedupe, hass before setConfig, a config change mid-fetch, next_due with a time part
+{
+  const el = new Card(); el.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.x", name: "X" }] });
+  const api = async () => [{ summary: "<img src=x onerror=alert(1)>", start: { dateTime: `${T}T23:58:00` }, end: { dateTime: `${T}T23:59:00` }, location: "<img src=x onerror=alert(1)>" }];
+  el.hass = mkHass({}, api); await tick(); await tick();
+  const h = el.shadowRoot.innerHTML;
+  check("hostile event summary/location print escaped, never raw", (h.match(/&lt;img src=x onerror=alert\(1\)&gt;/g) || []).length === 2 && !h.includes("<img src=x"));
+}
+{
+  const el = new Card(); el.setConfig({ mode: "help_wanted" });
+  const st = { "sensor.chores_due": { state: "unavailable", attributes: {} }, "sensor.homestead_classifieds": { state: "unavailable", attributes: { help_wanted_empty: "must not print" } } };
+  let threw = false; try { el.hass = mkHass(st); } catch (e) { threw = true; }
+  const h = el.shadowRoot.innerHTML;
+  check("unavailable due/copy sensors: renders the fallback, no error shell, no NaN/undefined", !threw && h.includes("No positions open") && !h.includes("must not print") && !h.includes("color:#b00") && !/NaN|undefined/.test(h));
+}
+{
+  const el = new Card(); el.setConfig({ mode: "help_wanted" });
+  const hass = mkHass({ "sensor.chores_due": { state: "1", attributes: { due_list: ["vacuum"] } }, "input_select.chore_vacuum_turn": { state: "James" } });
+  el.hass = hass; el.hass = hass; await tick();
+  check("render dedupe: the same hass twice → exactly one innerHTML assignment", el._sets === 1 && el.shadowRoot.innerHTML.includes("HELP WANTED"));
+}
+check("hass before setConfig does not throw", (() => { try { new Card().hass = mkHass({}); return true; } catch (e) { return false; } })());
+{
+  let resolve; const pending = new Promise((r) => { resolve = r; });
+  const el = new Card(); el.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.old", name: "Old" }] });
+  el.hass = mkHass({}, () => pending);
+  el.setConfig({ mode: "calendar", calendars: [{ entity: "calendar.new", name: "New" }] });
+  resolve([{ summary: "Stale event", start: { date: T }, end: { date: T } }]); await tick(); await tick();
+  check("setConfig mid-fetch: the stale calendar result is discarded", el._events.length === 0 && el._fetchedAt === 0 && !el.shadowRoot.innerHTML.includes("Stale event"));
+  el.hass = mkHass({}, async () => [{ summary: "Fresh event", start: { dateTime: `${T}T23:58:00` }, end: { dateTime: `${T}T23:59:00` } }]); await tick(); await tick();
+  check("…and the next hass fetches afresh for the new config", el._fetchedAt > 0 && el.shadowRoot.innerHTML.includes("Fresh event"));
+}
+{
+  const el = new Card(); el.setConfig({ mode: "notices" });
+  const d4 = new Date(today); d4.setDate(today.getDate() + 4);
+  const st = { "sensor.lawn_mow": { state: "ok", attributes: { friendly_name: "Lawn Mow lawn", maintenance_type: "task", parent_object: "Lawn", days_until_due: 4, next_due: ymd(d4) + "T00:00:00+00:00" } } };
+  el.hass = mkHass(st); const h = el.shadowRoot.innerHTML;
+  check("next_due with a time part: forthcoming line names the weekday, no undefined", new RegExp(`FORTHCOMING[\\s\\S]*?${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][d4.getDay()]}: mow lawn`).test(h) && !/NaN|undefined/.test(h));
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed"); process.exit(fails ? 1 : 0);

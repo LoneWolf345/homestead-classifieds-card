@@ -1,6 +1,6 @@
 # Homestead Classifieds Card
 
-Three newsprint cards for Home Assistant — a companion to the [Almanac Weather Card](https://github.com/LoneWolf345/desert-almanac-card) and the [Network Ledger Card](https://github.com/LoneWolf345/network-ledger-card). One card, three `mode`s:
+The small newsprint cards for Home Assistant — a companion to the [Almanac Weather Card](https://github.com/LoneWolf345/almanac-weather-card) and the [Network Ledger Card](https://github.com/LoneWolf345/network-ledger-card). One card, five `mode`s:
 
 - **`calendar`** — Community Calendar: today and tomorrow's events from any number of calendar entities, deduplicated across people ("James & Henry"), venue lines, a `NOW` tag on the event in progress, past events faded, and a MILESTONES footer for the next birthday or anniversary (age computed from a 4-digit year in the event description).
 - **`help_wanted`** — the kids' chores as classified ads, grouped by whose turn it is. Open chores read "OPEN · Applications close 8:00 AM"; chores logged today are pencilled out with the time they were filled.
@@ -51,15 +51,33 @@ todo_lists: [todo.chris_tasks, todo.katie_tasks]
 forthcoming_days: 7
 ```
 
+```yaml
+type: custom:homestead-classifieds-card
+mode: masthead
+title: The Homestead Times
+place: Maricopa, Arizona
+price: Two bits
+tagline_entity: sensor.homestead_tagline
+tagline_fallback: All the news that fits the column
+```
+
+```yaml
+type: custom:homestead-classifieds-card
+mode: colophon
+lead: Published every minute by Home Assistant
+text: Set in Fraunces and Archivo. Weather by the National Weather Service.
+```
+
 ## Options
 
 | Key | Modes | Default | Notes |
 |---|---|---|---|
-| `mode` | — | required | `calendar` · `help_wanted` · `notices` |
+| `mode` | — | required | `calendar` · `help_wanted` · `notices` · `masthead` · `colophon` |
 | `title`, `subtitle` | all | per mode | Kicker text, left and right |
 | `footer` | all | copy / fallback | Override the footer line |
 | `copy_entity` | all | `sensor.homestead_classifieds` | `''` to use built-in copy only |
 | `column_rule` | all | `false` | Draw the newspaper column rule in the left gutter (`--almanac-column-rule`, `--almanac-gutter`) |
+| `probe`, `probe_entity` | all | `0`, `sensor.homestead_scroll_probe` | **Diagnostics only.** `probe: <seconds>` records the page's scroll position and every card's height for that long (attaching touch listeners to the window) and POSTs the timeline to `probe_entity` through the REST states API, so a phone's scroll-jump behaviour can be read from anywhere. Leave at `0` in normal use |
 | `calendars` | calendar | required | `[{entity, name}]` |
 | `days` | calendar | `2` | Days to list, starting today |
 | `milestones_entity`, `milestone_days` | calendar | `''`, `14` | Calendar for the MILESTONES footer |
